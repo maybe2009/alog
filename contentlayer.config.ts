@@ -25,6 +25,16 @@ import rehypePresetMinify from 'rehype-preset-minify'
 import siteMetadata from './data/siteMetadata'
 import { allCoreContent, sortPosts } from 'pliny/utils/contentlayer.js'
 import prettier from 'prettier'
+// unified pipeline for safe HTML excerpt
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+import remarkGfmCore from 'remark-gfm'
+import remarkMdx from 'remark-mdx'
+import remarkRehype from 'remark-rehype'
+import rehypeStringify from 'rehype-stringify'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import type { Node } from 'unist'
+import type { Root } from 'mdast'
 
 const root = process.cwd()
 const isProduction = process.env.NODE_ENV === 'production'
@@ -57,6 +67,98 @@ const computedFields: ComputedFields = {
     resolve: (doc) => doc._raw.sourceFilePath,
   },
   toc: { type: 'json', resolve: (doc) => extractTocHeadings(doc.body.raw) },
+  /**
+   * A safe HTML excerpt for list pages.
+   * Priority: content before <!-- more -->; fallback: first ~150 words or 2 paragraphs.
+   * Images/iframes are not included as we only generate plain paragraph HTML.
+   */
+  excerptHtml: {
+    type: 'string',
+    resolve: (doc) => {
+      const maxLine = 20
+      const maxWord = 500
+      const raw = doc.body.raw || ''
+      const MORE = '<!-- more -->'
+
+      // 优先使用作者分隔标记
+      const head = raw.includes(MORE) ? raw.split(MORE)[0] : raw
+
+      // 解析为 MDAST
+      const mdast = unified().use(remarkParse).use(remarkGfmCore).use(remarkMdx).parse(head) as Root
+
+      // 从根 children 中收集合适的块级节点：paragraph / list（避免代码块、图片、视频、MDX 组件等）
+      // 并按段落数与词数上限截断
+      const children = mdast.children || []
+      const picked: Node[] = []
+      let wordCount = 0
+      const toText = (n: Node): string => {
+        if (!n) return ''
+        if ('value' in n && typeof n.value === 'string') return n.value
+        if ('children' in n && Array.isArray(n.children)) return n.children.map(toText).join(' ')
+        return ''
+      }
+      for (const node of children) {
+        if (
+          node.type === 'paragraph' ||
+          node.type === 'list' ||
+          node.type === 'heading' ||
+          node.type === 'blockquote' ||
+          node.type === 'code'
+        ) {
+          picked.push(node)
+          const text = toText(node)
+          wordCount += String(text).split(/\s+/).filter(Boolean).length
+          if (picked.length >= maxLine || wordCount >= maxWord) break
+        }
+        // 跳过 heading/code/image/mdxJsxFlowElement 等
+      }
+
+      // 兜底：若没有抽到任何段落，回退到 summary 文本
+      if (picked.length === 0 && doc.summary) {
+        return `<p>${String(doc.summary).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
+      }
+      if (picked.length === 0) return ''
+
+      const truncatedMdast = { type: 'root', children: picked }
+
+      // 限制允许的标签，移除危险属性
+      const schema = {
+        ...defaultSchema,
+        tagNames: [
+          'p',
+          'em',
+          'strong',
+          'a',
+          'code',
+          'pre',
+          'ul',
+          'ol',
+          'li',
+          'blockquote',
+          'br',
+          'h1',
+          'h2',
+          'h3',
+          'h4',
+        ],
+        attributes: {
+          a: ['href', 'title', 'rel', 'target'],
+          code: [],
+          pre: [],
+          blockquote: [],
+        },
+        clobberPrefix: 'c',
+      }
+
+      const hast = unified()
+        .use(remarkRehype, { allowDangerousHtml: false })
+        .runSync(truncatedMdast)
+
+      const html = unified().use(rehypeSanitize, schema).use(rehypeStringify).stringify(hast)
+
+      return String(html)
+    },
+  },
 }
 
 /**

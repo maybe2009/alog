@@ -14,7 +14,7 @@ export default function Home({ posts }) {
         <ul className="divide-y divide-gray-200 dark:divide-gray-700">
           {!posts.length && 'No posts found.'}
           {posts.slice(0, MAX_DISPLAY).map((post) => {
-            const { slug, date, title, summary, tags, images } = post
+            const { slug, date, title, summary, tags, images, excerptHtml } = post
             return (
               <li key={slug} className="py-12">
                 <article>
@@ -28,14 +28,14 @@ export default function Home({ posts }) {
                         </h2>
                       </div>
                       <div className="flex-col items-start gap-4">
-                        {images?.[0] && (
-                          <div className="relative h-56 w-full flex-shrink-0 overflow-hidden rounded-md border border-gray-200 md:h-64 dark:border-gray-700">
-                            <Image src={images[0]} alt={title} fill sizes="144px" />
-                          </div>
+                        {excerptHtml ? (
+                          <div
+                            className="prose line-clamp-20 max-w-none"
+                            dangerouslySetInnerHTML={{ __html: excerptHtml }}
+                          />
+                        ) : (
+                          <div className="prose max-w-none">{summary}</div>
                         )}
-                        <div className="prose max-w-none text-gray-500 dark:text-gray-400">
-                          {summary}
-                        </div>
                       </div>
                     </div>
                     <div className="text-center text-base leading-6 font-medium">
