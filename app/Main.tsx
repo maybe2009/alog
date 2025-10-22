@@ -17,7 +17,7 @@ export default function Home({ posts }) {
             const { slug, date, title, summary, tags, images, excerptHtml } = post
             return (
               <li key={slug} className="py-12">
-                <article>
+                <article className="prose dark:prose-invert">
                   <div className="space-y-5 xl:col-span-3">
                     <div className="space-y-6">
                       <div>
